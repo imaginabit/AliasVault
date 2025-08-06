@@ -9,17 +9,19 @@ import { StyleSheet, View, TouchableOpacity, Alert, Keyboard, KeyboardAvoidingVi
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import Toast from 'react-native-toast-message';
 
-import { CreateIdentityGenerator, IdentityHelperUtils, IdentityGenerator } from '@/utils/dist/shared/identity-generator';
-import type { Credential } from '@/utils/dist/shared/models/vault';
+import { CreateIdentityGenerator, IdentityGenerator, IdentityHelperUtils } from '@/utils/dist/shared/identity-generator';
+import type { Attachment, Credential, PasswordSettings } from '@/utils/dist/shared/models/vault';
 import type { FaviconExtractModel } from '@/utils/dist/shared/models/webapi';
 import { CreatePasswordGenerator, PasswordGenerator } from '@/utils/dist/shared/password-generator';
 import emitter from '@/utils/EventEmitter';
 import { extractServiceNameFromUrl } from '@/utils/UrlUtility';
-import { credentialSchema } from '@/utils/ValidationSchema';
+import { createCredentialSchema } from '@/utils/ValidationSchema';
 
 import { useColors } from '@/hooks/useColorScheme';
 import { useVaultMutate } from '@/hooks/useVaultMutate';
 
+import { AttachmentUploader } from '@/components/credentials/details/AttachmentUploader';
+import { AdvancedPasswordField } from '@/components/form/AdvancedPasswordField';
 import { ValidatedFormField, ValidatedFormFieldRef } from '@/components/form/ValidatedFormField';
 import LoadingOverlay from '@/components/LoadingOverlay';
 import { ThemedContainer } from '@/components/themed/ThemedContainer';
@@ -48,10 +50,13 @@ export default function AddEditCredentialScreen() : React.ReactNode {
   const serviceNameRef = useRef<ValidatedFormFieldRef>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaveDisabled, setIsSaveDisabled] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [originalAttachmentIds, setOriginalAttachmentIds] = useState<string[]>([]);
+  const [passwordSettings, setPasswordSettings] = useState<PasswordSettings | null>(null);
   const { t } = useTranslation();
 
   const { control, handleSubmit, setValue, watch } = useForm<Credential>({
-    resolver: yupResolver(credentialSchema) as Resolver<Credential>,
+    resolver: yupResolver(createCredentialSchema(t)) as Resolver<Credential>,
     defaultValues: {
       Id: "",
       Username: "",
@@ -89,6 +94,11 @@ export default function AddEditCredentialScreen() : React.ReactNode {
         if (existingCredential.Alias?.FirstName || existingCredential.Alias?.LastName) {
           setMode('manual');
         }
+
+        // Load attachments for this credential
+        const credentialAttachments = await dbContext.sqliteClient!.getAttachmentsForCredential(id);
+        setAttachments(credentialAttachments);
+        setOriginalAttachmentIds(credentialAttachments.map(a => a.Id));
       }
     } catch (err) {
       console.error('Error loading credential:', err);
@@ -105,39 +115,54 @@ export default function AddEditCredentialScreen() : React.ReactNode {
    * if we're in add mode and the service URL is provided (by native autofill component).
    */
   useEffect(() => {
-    if (authContext.isOffline) {
-      // Show toast and close the modal
-      setTimeout(() => {
-        Toast.show({
-          type: 'error',
-          text1: t('credentials.offlineMessage'),
-          position: 'bottom'
-        });
-      }, 100);
-      router.dismiss();
-      return;
-    }
+    /**
+     * Initialize the component by loading settings and handling initial state.
+     */
+    const initializeComponent = async (): Promise<void> => {
+      if (authContext.isOffline) {
+        // Show toast and close the modal
+        setTimeout(() => {
+          Toast.show({
+            type: 'error',
+            text1: t('credentials.offlineMessage'),
+            position: 'bottom'
+          });
+        }, 100);
+        router.dismiss();
+        return;
+      }
 
-    if (isEditMode) {
-      loadExistingCredential();
-    } else if (serviceUrl) {
-      const decodedUrl = decodeURIComponent(serviceUrl);
-      const serviceName = extractServiceNameFromUrl(decodedUrl);
-      setValue('ServiceUrl', decodedUrl);
-      setValue('ServiceName', serviceName);
-    }
+      // Load password settings
+      try {
+        const settings = await dbContext.sqliteClient!.getPasswordSettings();
+        setPasswordSettings(settings);
+      } catch (err) {
+        console.error('Error loading password settings:', err);
+      }
 
-    // On create mode, focus the service name field after a short delay to ensure the component is mounted
-    if (!isEditMode) {
-      setTimeout(() => {
-        serviceNameRef.current?.focus();
-      }, 100);
-    }
-  }, [id, isEditMode, serviceUrl, loadExistingCredential, setValue, authContext.isOffline, router, t]);
+      if (isEditMode) {
+        loadExistingCredential();
+      } else if (serviceUrl) {
+        const decodedUrl = decodeURIComponent(serviceUrl);
+        const serviceName = extractServiceNameFromUrl(decodedUrl);
+        setValue('ServiceUrl', decodedUrl);
+        setValue('ServiceName', serviceName);
+      }
+
+      // On create mode, focus the service name field after a short delay to ensure the component is mounted
+      if (!isEditMode) {
+        setTimeout(() => {
+          serviceNameRef.current?.focus();
+        }, 100);
+      }
+    };
+
+    initializeComponent();
+  }, [id, isEditMode, serviceUrl, loadExistingCredential, setValue, authContext.isOffline, router, t, dbContext.sqliteClient]);
 
   /**
    * Initialize the identity and password generators with settings from user's vault.
-   * @returns {identityGenerator: IdentityGenerator, passwordGenerator: PasswordGenerator}
+   * @returns {identityGenerator: IIdentityGenerator, passwordGenerator: PasswordGenerator}
    */
   const initializeGenerators = useCallback(async () : Promise<{ identityGenerator: IdentityGenerator, passwordGenerator: PasswordGenerator }> => {
     // Get default identity language from database
@@ -282,9 +307,9 @@ export default function AddEditCredentialScreen() : React.ReactNode {
 
     await executeVaultMutation(async () => {
       if (isEditMode) {
-        await dbContext.sqliteClient!.updateCredentialById(credentialToSave);
+        await dbContext.sqliteClient!.updateCredentialById(credentialToSave, originalAttachmentIds, attachments);
       } else {
-        const credentialId = await dbContext.sqliteClient!.createCredential(credentialToSave);
+        const credentialId = await dbContext.sqliteClient!.createCredential(credentialToSave, attachments);
         credentialToSave.Id = credentialId;
       }
 
@@ -315,7 +340,7 @@ export default function AddEditCredentialScreen() : React.ReactNode {
 
       setIsSyncing(false);
     }
-  }, [isEditMode, id, serviceUrl, router, executeVaultMutation, dbContext.sqliteClient, mode, generateRandomAlias, webApi, watch, setIsSaveDisabled, setIsSyncing, isSaveDisabled, t]);
+  }, [isEditMode, id, serviceUrl, router, executeVaultMutation, dbContext.sqliteClient, mode, generateRandomAlias, webApi, watch, setIsSaveDisabled, setIsSyncing, isSaveDisabled, t, originalAttachmentIds, attachments]);
 
   /**
    * Generate a random username.
@@ -443,7 +468,6 @@ export default function AddEditCredentialScreen() : React.ReactNode {
       borderRadius: 8,
       flexDirection: 'row',
       marginBottom: 8,
-      marginTop: 16,
       paddingHorizontal: 12,
       paddingVertical: 8,
     },
@@ -543,11 +567,11 @@ export default function AddEditCredentialScreen() : React.ReactNode {
          */
         headerRight: () => (
           <Pressable
-            onPress={handleSubmit(onSubmit)}
-            style={[styles.headerRightButton, isSaveDisabled && styles.headerRightButtonDisabled]}
+            onPressIn={handleSubmit(onSubmit)}
             android_ripple={{ color: 'lightgray' }}
             pressRetentionOffset={100}
             hitSlop={100}
+            style={[styles.headerRightButton, isSaveDisabled && styles.headerRightButtonDisabled]}
             disabled={isSaveDisabled}
           >
             <MaterialIcons name="save" size={24} color={colors.primary} />
@@ -627,6 +651,11 @@ export default function AddEditCredentialScreen() : React.ReactNode {
 
                   <ValidatedFormField
                     control={control}
+                    name="Alias.Email"
+                    label={t('credentials.email')}
+                  />
+                  <ValidatedFormField
+                    control={control}
                     name="Username"
                     label={t('credentials.username')}
                     buttons={[
@@ -636,38 +665,45 @@ export default function AddEditCredentialScreen() : React.ReactNode {
                       }
                     ]}
                   />
-                  <ValidatedFormField
-                    control={control}
-                    name="Password"
-                    label={t('credentials.password')}
-                    secureTextEntry={!isPasswordVisible}
-                    buttons={[
-                      {
-                        icon: isPasswordVisible ? "visibility-off" : "visibility",
-                        /**
-                         * Toggle the visibility of the password.
-                         */
-                        onPress: () => setIsPasswordVisible(!isPasswordVisible)
-                      },
-                      {
-                        icon: "refresh",
-                        onPress: generateRandomPassword
-                      }
-                    ]}
-                  />
-                  <TouchableOpacity style={styles.generateButton} onPress={handleGenerateRandomAlias}>
-                    <MaterialIcons name="auto-fix-high" size={20} color="#fff" />
-                    <ThemedText style={styles.generateButtonText}>{t('credentials.generateRandomAlias')}</ThemedText>
-                  </TouchableOpacity>
-                  <ValidatedFormField
-                    control={control}
-                    name="Alias.Email"
-                    label={t('credentials.email')}
-                  />
+                  {passwordSettings ? (
+                    <AdvancedPasswordField
+                      control={control}
+                      name="Password"
+                      label={t('credentials.password')}
+                      initialSettings={passwordSettings}
+                      showPassword={isPasswordVisible}
+                      onShowPasswordChange={setIsPasswordVisible}
+                      isNewCredential={!isEditMode}
+                    />
+                  ) : (
+                    <ValidatedFormField
+                      control={control}
+                      name="Password"
+                      label={t('credentials.password')}
+                      secureTextEntry={!isPasswordVisible}
+                      buttons={[
+                        {
+                          icon: isPasswordVisible ? "visibility-off" : "visibility",
+                          /**
+                           * Toggle the visibility of the password.
+                           */
+                          onPress: () => setIsPasswordVisible(!isPasswordVisible)
+                        },
+                        {
+                          icon: "refresh",
+                          onPress: generateRandomPassword
+                        }
+                      ]}
+                    />
+                  )}
                 </View>
 
                 <View style={styles.section}>
                   <ThemedText style={styles.sectionTitle}>{t('credentials.alias')}</ThemedText>
+                  <TouchableOpacity style={styles.generateButton} onPress={handleGenerateRandomAlias}>
+                    <MaterialIcons name="auto-fix-high" size={20} color="#fff" />
+                    <ThemedText style={styles.generateButtonText}>{t('credentials.generateRandomAlias')}</ThemedText>
+                  </TouchableOpacity>
                   <ValidatedFormField
                     control={control}
                     name="Alias.FirstName"
@@ -708,6 +744,15 @@ export default function AddEditCredentialScreen() : React.ReactNode {
                     textAlignVertical="top"
                   />
                   {/* TODO: Add TOTP management */}
+                </View>
+
+                <View style={styles.section}>
+                  <ThemedText style={styles.sectionTitle}>{t('credentials.attachments')}</ThemedText>
+
+                  <AttachmentUploader
+                    attachments={attachments}
+                    onAttachmentsChange={setAttachments}
+                  />
                 </View>
 
                 {isEditMode && (

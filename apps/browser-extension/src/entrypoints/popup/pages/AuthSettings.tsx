@@ -27,7 +27,7 @@ const DEFAULT_OPTIONS: ApiOption[] = [
 const createUrlSchema = (t: (key: string) => string): Yup.ObjectSchema<{apiUrl: string; clientUrl: string}> => Yup.object().shape({
   apiUrl: Yup.string()
     .required(t('validation.apiUrlRequired'))
-    .test('is-valid-api-url', t('validation.apiUrlInvalid'), (value: string | undefined) => {
+    .test('is-valid-api-url', t('settings.validation.apiUrlInvalid'), (value: string | undefined) => {
       if (!value) {
         return true; // Allow empty for non-custom option
       }
@@ -40,7 +40,7 @@ const createUrlSchema = (t: (key: string) => string): Yup.ObjectSchema<{apiUrl: 
     }),
   clientUrl: Yup.string()
     .required(t('validation.clientUrlRequired'))
-    .test('is-valid-client-url', t('validation.clientUrlInvalid'), (value: string | undefined) => {
+    .test('is-valid-client-url', t('settings.validation.clientUrlInvalid'), (value: string | undefined) => {
       if (!value) {
         return true; // Allow empty for non-custom option
       }
@@ -183,7 +183,7 @@ const AuthSettings: React.FC = () => {
 
       <div className="mb-6">
         <label htmlFor="api-connection" className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-          {t('common.serverUrl')}
+          {t('settings.serverUrl')}
         </label>
         <select
           value={selectedOption}
@@ -238,7 +238,7 @@ const AuthSettings: React.FC = () => {
       {/* Autofill Popup Settings Section */}
       <div className="mb-6">
         <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-gray-900 dark:text-white">{t('common.autofillEnabled')}</p>
+          <p className="text-sm font-medium text-gray-900 dark:text-white">{t('settings.autofillEnabled')}</p>
           <button
             onClick={toggleGlobalPopup}
             className={`px-4 py-2 rounded-md transition-colors ${
@@ -253,7 +253,7 @@ const AuthSettings: React.FC = () => {
       </div>
 
       <div className="text-center text-gray-400 dark:text-gray-600">
-        {t('common.version')}: {AppInfo.VERSION}
+        {t('settings.version')}: {AppInfo.VERSION}
       </div>
     </div>
   );

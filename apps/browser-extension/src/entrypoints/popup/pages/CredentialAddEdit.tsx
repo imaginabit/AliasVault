@@ -1,28 +1,30 @@
 import { Buffer } from 'buffer';
 
 import { yupResolver } from '@hookform/resolvers/yup';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { sendMessage } from 'webext-bridge/popup';
 import * as Yup from 'yup';
 
+import AttachmentUploader from '@/entrypoints/popup/components/CredentialDetails/AttachmentUploader';
 import { FormInput } from '@/entrypoints/popup/components/FormInput';
 import HeaderButton from '@/entrypoints/popup/components/HeaderButton';
 import { HeaderIconType } from '@/entrypoints/popup/components/Icons/HeaderIcons';
+import LoadingSpinner from '@/entrypoints/popup/components/LoadingSpinner';
 import Modal from '@/entrypoints/popup/components/Modal';
+import PasswordField from '@/entrypoints/popup/components/PasswordField';
+import UsernameField from '@/entrypoints/popup/components/UsernameField';
 import { useDb } from '@/entrypoints/popup/context/DbContext';
 import { useHeaderButtons } from '@/entrypoints/popup/context/HeaderButtonsContext';
+import { useLoading } from '@/entrypoints/popup/context/LoadingContext';
 import { useWebApi } from '@/entrypoints/popup/context/WebApiContext';
 import { useVaultMutate } from '@/entrypoints/popup/hooks/useVaultMutate';
 
 import { IdentityHelperUtils, CreateIdentityGenerator, CreateUsernameEmailGenerator, Identity, Gender } from '@/utils/dist/shared/identity-generator';
-import type { Credential } from '@/utils/dist/shared/models/vault';
+import type { Attachment, Credential } from '@/utils/dist/shared/models/vault';
 import { CreatePasswordGenerator } from '@/utils/dist/shared/password-generator';
-
-import LoadingSpinner from '../components/LoadingSpinner';
-import { useLoading } from '../context/LoadingContext';
 
 type CredentialMode = 'random' | 'manual';
 
@@ -34,38 +36,6 @@ type PersistedFormData = {
 }
 
 /**
- * Validation schema for the credential form.
- */
-const credentialSchema = Yup.object().shape({
-  Id: Yup.string(),
-  ServiceName: Yup.string().required('Service name is required'),
-  ServiceUrl: Yup.string().url('Invalid URL format').nullable().optional(),
-  Alias: Yup.object().shape({
-    FirstName: Yup.string().nullable().optional(),
-    LastName: Yup.string().nullable().optional(),
-    NickName: Yup.string().nullable().optional(),
-    BirthDate: Yup.string()
-      .nullable()
-      .optional()
-      .test(
-        'is-valid-date-format',
-        'Date must be in YYYY-MM-DD format',
-        value => {
-          if (!value) {
-            return true;
-          }
-          return /^\d{4}-\d{2}-\d{2}$/.test(value);
-        },
-      ),
-    Gender: Yup.string().nullable().optional(),
-    Email: Yup.string().email('Invalid email format').nullable().optional()
-  }),
-  Username: Yup.string().nullable().optional(),
-  Password: Yup.string().nullable().optional(),
-  Notes: Yup.string().nullable().optional()
-});
-
-/**
  * Add or edit credential page.
  */
 const CredentialAddEdit: React.FC = () => {
@@ -73,13 +43,50 @@ const CredentialAddEdit: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const dbContext = useDb();
+  // If we received an ID, we're in edit mode
+  const isEditMode = id !== undefined && id.length > 0;
+
+  /**
+   * Validation schema for the credential form with translatable messages.
+   */
+  const credentialSchema = useMemo(() => Yup.object().shape({
+    Id: Yup.string(),
+    ServiceName: Yup.string().required(t('credentials.validation.serviceNameRequired')),
+    ServiceUrl: Yup.string().url(t('credentials.validation.invalidUrl')).nullable().optional(),
+    Alias: Yup.object().shape({
+      FirstName: Yup.string().nullable().optional(),
+      LastName: Yup.string().nullable().optional(),
+      NickName: Yup.string().nullable().optional(),
+      BirthDate: Yup.string()
+        .nullable()
+        .optional()
+        .test(
+          'is-valid-date-format',
+          t('credentials.validation.invalidDateFormat'),
+          value => {
+            if (!value) {
+              return true;
+            }
+            return /^\d{4}-\d{2}-\d{2}$/.test(value);
+          },
+        ),
+      Gender: Yup.string().nullable().optional(),
+      Email: Yup.string().email(t('credentials.validation.invalidEmail')).nullable().optional()
+    }),
+    Username: Yup.string().nullable().optional(),
+    Password: Yup.string().nullable().optional(),
+    Notes: Yup.string().nullable().optional()
+  }), [t]);
+
   const { executeVaultMutation, isLoading, syncStatus } = useVaultMutate();
   const [mode, setMode] = useState<CredentialMode>('random');
   const { setHeaderButtons } = useHeaderButtons();
   const { setIsInitialLoading } = useLoading();
   const [localLoading, setLocalLoading] = useState(true);
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(!isEditMode);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [originalAttachmentIds, setOriginalAttachmentIds] = useState<string[]>([]);
   const webApi = useWebApi();
 
   const serviceNameRef = useRef<HTMLInputElement>(null);
@@ -142,9 +149,6 @@ const CredentialAddEdit: React.FC = () => {
     });
     return (): void => subscription.unsubscribe();
   }, [watch, persistFormValues]);
-
-  // If we received an ID, we're in edit mode
-  const isEditMode = id !== undefined && id.length > 0;
 
   /**
    * Loads persisted form values from storage. This is used to keep track of form changes
@@ -225,7 +229,15 @@ const CredentialAddEdit: React.FC = () => {
       setIsInitialLoading(false);
 
       // Load persisted form values if they exist.
-      loadPersistedValues();
+      loadPersistedValues().then(() => {
+        // Generate default password if no persisted password exists
+        if (!watch('Password')) {
+          const passwordSettings = dbContext.sqliteClient!.getPasswordSettings();
+          const passwordGenerator = CreatePasswordGenerator(passwordSettings);
+          const defaultPassword = passwordGenerator.generateRandomPassword();
+          setValue('Password', defaultPassword);
+        }
+      });
       return;
     }
 
@@ -240,6 +252,11 @@ const CredentialAddEdit: React.FC = () => {
           setValue(key as keyof Credential, value);
         });
 
+        // Load attachments for this credential
+        const credentialAttachments = dbContext.sqliteClient.getAttachmentsForCredential(id);
+        setAttachments(credentialAttachments);
+        setOriginalAttachmentIds(credentialAttachments.map(a => a.Id));
+
         setMode('manual');
         setIsInitialLoading(false);
 
@@ -253,7 +270,7 @@ const CredentialAddEdit: React.FC = () => {
       console.error('Error loading credential:', err);
       setIsInitialLoading(false);
     }
-  }, [dbContext.sqliteClient, id, navigate, setIsInitialLoading, setValue, loadPersistedValues]);
+  }, [dbContext.sqliteClient, id, navigate, setIsInitialLoading, setValue, loadPersistedValues, watch]);
 
   /**
    * Handle the delete button click.
@@ -370,16 +387,9 @@ const CredentialAddEdit: React.FC = () => {
     }
   }, [setValue, watch]);
 
-  const generateRandomPassword = useCallback(async () => {
-    try {
-      const { passwordGenerator } = await initializeGenerators();
-      const password = passwordGenerator.generateRandomPassword();
-      setValue('Password', password);
-      setShowPassword(true);
-    } catch (error) {
-      console.error('Error generating random password:', error);
-    }
-  }, [initializeGenerators, setValue]);
+  const initialPasswordSettings = useMemo(() => {
+    return dbContext.sqliteClient?.getPasswordSettings();
+  }, [dbContext.sqliteClient]);
 
   /**
    * Handle form submission.
@@ -429,9 +439,9 @@ const CredentialAddEdit: React.FC = () => {
       setLocalLoading(false);
 
       if (isEditMode) {
-        await dbContext.sqliteClient!.updateCredentialById(data);
+        await dbContext.sqliteClient!.updateCredentialById(data, originalAttachmentIds, attachments);
       } else {
-        const credentialId = await dbContext.sqliteClient!.createCredential(data);
+        const credentialId = await dbContext.sqliteClient!.createCredential(data, attachments);
         data.Id = credentialId.toString();
       }
     }, {
@@ -450,7 +460,7 @@ const CredentialAddEdit: React.FC = () => {
         }
       },
     });
-  }, [isEditMode, dbContext.sqliteClient, executeVaultMutation, navigate, mode, watch, generateRandomAlias, webApi, clearPersistedValues]);
+  }, [isEditMode, dbContext.sqliteClient, executeVaultMutation, navigate, mode, watch, generateRandomAlias, webApi, clearPersistedValues, originalAttachmentIds, attachments]);
 
   // Set header buttons on mount and clear on unmount
   useEffect((): (() => void) => {
@@ -576,56 +586,53 @@ const CredentialAddEdit: React.FC = () => {
               <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">{t('credentials.loginCredentials')}</h2>
               <div className="space-y-4">
                 <FormInput
-                  id="username"
-                  label={t('common.username')}
-                  value={watch('Username') ?? ''}
-                  onChange={(value) => setValue('Username', value)}
-                  error={errors.Username?.message}
-                  buttons={[
-                    {
-                      icon: 'refresh',
-                      onClick: generateRandomUsername,
-                      title: t('credentials.generateRandomUsername')
-                    }
-                  ]}
-                />
-                <FormInput
-                  id="password"
-                  label={t('common.password')}
-                  type="password"
-                  value={watch('Password') ?? ''}
-                  onChange={(value) => setValue('Password', value)}
-                  error={errors.Password?.message}
-                  showPassword={showPassword}
-                  onShowPasswordChange={setShowPassword}
-                  buttons={[
-                    {
-                      icon: 'refresh',
-                      onClick: generateRandomPassword,
-                      title: t('credentials.generateRandomPassword')
-                    }
-                  ]}
-                />
-                <button
-                  type="button"
-                  onClick={handleGenerateRandomAlias}
-                  className="w-full bg-primary-500 text-white py-2 px-4 rounded hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
-                >
-                  {t('credentials.generateRandomAlias')}
-                </button>
-                <FormInput
                   id="email"
                   label={t('common.email')}
                   value={watch('Alias.Email') ?? ''}
                   onChange={(value) => setValue('Alias.Email', value)}
                   error={errors.Alias?.Email?.message}
                 />
+                <UsernameField
+                  id="username"
+                  label={t('common.username')}
+                  value={watch('Username') ?? ''}
+                  onChange={(value) => setValue('Username', value)}
+                  error={errors.Username?.message}
+                  onRegenerate={generateRandomUsername}
+                />
+                {initialPasswordSettings && (
+                  <PasswordField
+                    id="password"
+                    label={t('common.password')}
+                    value={watch('Password') ?? ''}
+                    onChange={(value) => setValue('Password', value)}
+                    error={errors.Password?.message}
+                    showPassword={showPassword}
+                    onShowPasswordChange={setShowPassword}
+                    initialSettings={initialPasswordSettings}
+                  />
+                )}
               </div>
             </div>
 
             <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
               <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">{t('credentials.alias')}</h2>
               <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={handleGenerateRandomAlias}
+                  className="w-full bg-primary-500 text-white py-2 px-4 rounded hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 flex items-center justify-center gap-2"
+                >
+                  <svg className='w-5 h-5 inline-block' viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <circle cx="8" cy="8" r="1"/>
+                    <circle cx="16" cy="8" r="1"/>
+                    <circle cx="12" cy="12" r="1"/>
+                    <circle cx="8" cy="16" r="1"/>
+                    <circle cx="16" cy="16" r="1"/>
+                  </svg>
+                  <span>{t('credentials.generateRandomAlias')}</span>
+                </button>
                 <FormInput
                   id="firstName"
                   label={t('credentials.firstName')}
@@ -679,6 +686,12 @@ const CredentialAddEdit: React.FC = () => {
                 />
               </div>
             </div>
+
+            <AttachmentUploader
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              originalAttachmentIds={originalAttachmentIds}
+            />
           </>
         )}
       </div>

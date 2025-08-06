@@ -3,23 +3,20 @@ import { useFonts } from 'expo-font';
 import { Href, Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState } from 'react';
-import { Linking, StyleSheet, Alert, Platform } from 'react-native';
+import { Linking, StyleSheet, Platform } from 'react-native';
 import 'react-native-reanimated';
 import 'react-native-get-random-values';
 import { install } from 'react-native-quick-crypto';
 
 import { useColors, useColorScheme } from '@/hooks/useColorScheme';
-import { useVaultSync } from '@/hooks/useVaultSync';
 
 import SpaceMono from '@/assets/fonts/SpaceMono-Regular.ttf';
-import LoadingIndicator from '@/components/LoadingIndicator';
 import { ThemedView } from '@/components/themed/ThemedView';
 import { AliasVaultToast } from '@/components/Toast';
-import { AuthProvider, useAuth } from '@/context/AuthContext';
-import { DbProvider, useDb } from '@/context/DbContext';
-import { useWebApi, WebApiProvider } from '@/context/WebApiContext';
+import { AuthProvider } from '@/context/AuthContext';
+import { DbProvider } from '@/context/DbContext';
+import { WebApiProvider } from '@/context/WebApiContext';
 import { initI18n } from '@/i18n';
-import NativeVaultManager from '@/specs/NativeVaultManager';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -30,11 +27,6 @@ function RootLayoutNav() : React.ReactNode {
   const colorScheme = useColorScheme();
   const colors = useColors();
   const router = useRouter();
-  const [status, setStatus] = useState('');
-  const { initializeAuth } = useAuth();
-  const { syncVault } = useVaultSync();
-  const dbContext = useDb();
-  const webApi = useWebApi();
 
   const [bootComplete, setBootComplete] = useState(false);
   const [redirectTarget, setRedirectTarget] = useState<string | null>(null);
@@ -42,7 +34,7 @@ function RootLayoutNav() : React.ReactNode {
 
   useEffect(() => {
     /**
-     * Initialize the app.
+     * Initialize the app by redirecting to the initialize page.
      */
     const initializeApp = async () : Promise<void> => {
       if (hasBooted.current) {
@@ -56,142 +48,12 @@ function RootLayoutNav() : React.ReactNode {
       await initI18n();
 
       hasBooted.current = true;
-
-      /**
-       * Handle vault unlocking process.
-       */
-      async function handleVaultUnlock() : Promise<void> {
-        const { enabledAuthMethods } = await initializeAuth();
-
-        try {
-          const hasEncryptedDatabase = await NativeVaultManager.hasEncryptedDatabase();
-          if (hasEncryptedDatabase) {
-            const isFaceIDEnabled = enabledAuthMethods.includes('faceid');
-            if (!isFaceIDEnabled) {
-              setRedirectTarget('/unlock');
-              setBootComplete(true);
-              return;
-            }
-
-            setStatus('Unlocking vault');
-            const isUnlocked = await dbContext.unlockVault();
-            if (isUnlocked) {
-              await new Promise(resolve => setTimeout(resolve, 750));
-              setStatus('Decrypting vault');
-              await new Promise(resolve => setTimeout(resolve, 750));
-
-              // Check if the vault is up to date, if not, redirect to the upgrade page.
-              if (await dbContext.hasPendingMigrations()) {
-                setRedirectTarget('/upgrade');
-                setBootComplete(true);
-                return;
-              }
-
-              setBootComplete(true);
-              return;
-            }
-
-            setRedirectTarget('/unlock');
-            setBootComplete(true);
-            return;
-          } else {
-            setRedirectTarget('/unlock');
-            setBootComplete(true);
-            return;
-          }
-        } catch {
-          setRedirectTarget('/unlock');
-          setBootComplete(true);
-          return;
-        }
-      }
-
-      /**
-       * Initialize the app.
-       */
-      const initialize = async () : Promise<void> => {
-        const { isLoggedIn } = await initializeAuth();
-
-        if (!isLoggedIn) {
-          setRedirectTarget('/login');
-          setBootComplete(true);
-          return;
-        }
-
-        // First perform vault sync
-        await syncVault({
-          initialSync: true,
-          /**
-           * Handle the status update.
-           */
-          onStatus: (message) => {
-            setStatus(message);
-          },
-          /**
-           * Handle successful vault sync and continue with vault unlock flow.
-           */
-          onSuccess: async () => {
-          // Continue with the rest of the flow after successful sync
-            handleVaultUnlock();
-          },
-          /**
-           * Handle offline state and prompt user for action.
-           */
-          onOffline: async () => {
-            Alert.alert(
-              'Sync Issue',
-              'The AliasVault server could not be reached and your vault could not be synced. Would you like to open your local vault in read-only mode or retry the connection?',
-              [
-                {
-                  text: 'Open Local Vault',
-                  /**
-                   * Handle opening vault in read-only mode.
-                   */
-                  onPress: async () : Promise<void> => {
-                    setStatus('Opening vault in read-only mode');
-                    await handleVaultUnlock();
-                  }
-                },
-                {
-                  text: 'Retry Sync',
-                  /**
-                   * Handle retrying the connection.
-                   */
-                  onPress: () : void => {
-                    setStatus('Retrying connection...');
-                    initialize();
-                  }
-                }
-              ]
-            );
-          },
-          /**
-           * Handle error during vault sync.
-           */
-          onError: async (error: string) => {
-          // Show modal with error message
-            Alert.alert('Error', error);
-
-            // The logout user and navigate to the login screen.
-            await webApi.logout(error);
-            setRedirectTarget('/login');
-            setBootComplete(true);
-          },
-          /**
-           * On upgrade required.
-           */
-          onUpgradeRequired: () : void => {
-            setRedirectTarget('/upgrade');
-            setBootComplete(true);
-          },
-        });
-      };
-
-      initialize();
+      setRedirectTarget('/initialize');
+      setBootComplete(true);
     };
 
     initializeApp();
-  }, [dbContext, syncVault, initializeAuth, webApi]);
+  }, []);
 
   useEffect(() => {
     /**
@@ -244,7 +106,7 @@ function RootLayoutNav() : React.ReactNode {
   if (!bootComplete) {
     return (
       <ThemedView style={styles.container}>
-        {status ? <LoadingIndicator status={status} /> : null}
+        {/* Loading state while booting */}
       </ThemedView>
     );
   }
@@ -284,13 +146,14 @@ function RootLayoutNav() : React.ReactNode {
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="login" options={{ title: 'Login', headerShown: false }} />
-        <Stack.Screen name="login-settings" options={{ title: 'Login Settings' }} />
+        <Stack.Screen name="initialize" options={{ headerShown: false }} />
+        <Stack.Screen name="login" options={{ headerShown: false }} />
+        <Stack.Screen name="login-settings" />
         <Stack.Screen name="reinitialize" options={{ headerShown: false }} />
         <Stack.Screen name="unlock" options={{ headerShown: false }} />
         <Stack.Screen name="upgrade" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" options={{ title: 'Not Found' }} />
+        <Stack.Screen name="+not-found" />
       </Stack>
       <AliasVaultToast />
     </ThemeProvider>

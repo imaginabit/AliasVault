@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system';
 import { useLocalSearchParams, useRouter, useNavigation, Stack } from 'expo-router';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { StyleSheet, View, TouchableOpacity, ActivityIndicator, Alert, Share, useColorScheme, TextInput, Linking } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, ActivityIndicator, Alert, Share, useColorScheme, Linking, Text, TextInput, Platform, Pressable } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 import type { Credential } from '@/utils/dist/shared/models/vault';
@@ -324,22 +324,45 @@ export default function EmailDetailsScreen() : React.ReactNode {
        */
       headerRight: () => (
         <View style={styles.headerRightContainer}>
-          <TouchableOpacity
-            onPress={() => setHtmlView(!isHtmlView)}
-            style={styles.headerRightButton}
-          >
-            <Ionicons
-              name={isHtmlView ? 'text-outline' : 'document-outline'}
-              size={22}
-              color={colors.primary}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleDelete}
-            style={styles.headerRightButton}
-          >
-            <Ionicons name="trash-outline" size={22} color="#FF0000" />
-          </TouchableOpacity>
+          {Platform.OS === 'android' ? (
+            <>
+              <Pressable
+                onPressIn={() => setHtmlView(!isHtmlView)}
+                style={styles.headerRightButton}
+              >
+                <Ionicons
+                  name={isHtmlView ? 'text-outline' : 'document-outline'}
+                  size={24}
+                  color={colors.primary}
+                />
+              </Pressable>
+              <Pressable
+                onPressIn={handleDelete}
+                style={styles.headerRightButton}
+              >
+                <Ionicons name="trash-outline" size={24} color="#FF0000" />
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity
+                onPress={() => setHtmlView(!isHtmlView)}
+                style={styles.headerRightButton}
+              >
+                <Ionicons
+                  name={isHtmlView ? 'text-outline' : 'document-outline'}
+                  size={22}
+                  color={colors.primary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleDelete}
+                style={styles.headerRightButton}
+              >
+                <Ionicons name="trash-outline" size={22} color="#FF0000" />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       ),
     });
@@ -467,13 +490,21 @@ export default function EmailDetailsScreen() : React.ReactNode {
       />
     );
   } else {
-    emailView = (
+    emailView = Platform.OS === 'ios' ? (
       <TextInput
+        multiline
+        editable={false}
+        selectTextOnFocus={true}
         style={[styles.plainText, isDarkMode ? styles.textDark : styles.textLight]}
         value={email.messagePlain || t('emails.noPlainText')}
-        editable={false}
-        multiline
       />
+    ) : (
+      <Text
+        selectable
+        style={[styles.plainText, isDarkMode ? styles.textDark : styles.textLight]}
+      >
+        {email.messagePlain || t('emails.noPlainText')}
+      </Text>
     );
   }
 
