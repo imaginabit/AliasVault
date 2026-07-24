@@ -142,10 +142,12 @@ jobs:
       # (~55 min: Rust→WASM + wasm-tools + WASM publish) holds one slot while the remaining
       # light images cycle through the second slot (~35-45 min total). This frees up the rest
       # of the CI worker pool for other workflows.
-      # On self-hosted: 1, since a single runner service handles one job at a time anyway. The
-      # persistent buildx cache carries the shared .NET layers from one image to the next.
-      # Raise this only if the machine runs multiple runner services.
-      max-parallel: ${{ inputs.runner == 'self-hosted' && 1 || 2 }}
+      # On self-hosted: no meaningful cap, the size of our own "docker-build" runner pool is the
+      # real limit, so let every image queue and fill whatever runners are free. This is what lets
+      # the pool pick these up the moment the all-in-one job finishes, instead of leaving a runner
+      # idle. Each runner keeps its own persistent buildx cache, which carries the shared .NET
+      # layers from one image to the next.
+      max-parallel: ${{ inputs.runner == 'self-hosted' && 8 || 2 }}
       matrix:
         # Client is listed first so it claims a slot immediately and runs alongside the rest of the images.
         include:
