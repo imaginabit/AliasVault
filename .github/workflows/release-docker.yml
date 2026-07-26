@@ -244,7 +244,7 @@ jobs:
       # Keep the persistent builder cache from growing without bound on our own hardware.
       - name: Prune stale build cache
         if: always() && runner.environment == 'self-hosted'
-        run: docker buildx prune --force --filter until=168h
+        run: docker buildx prune --force --keep-storage=50GB
 
   build-and-push-docker-all-in-one:
     needs: [valid-release, detect-version]
@@ -336,7 +336,7 @@ jobs:
 
       - name: Prune stale build cache
         if: always() && runner.environment == 'self-hosted'
-        run: docker buildx prune --force --filter until=168h
+        run: docker buildx prune --force --keep-storage=50GB
 
   # Tag existing images as :latest without rebuilding (for release events when images already exist)
   tag-docker-images-latest:
