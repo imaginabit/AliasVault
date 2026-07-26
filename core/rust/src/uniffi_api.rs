@@ -222,7 +222,8 @@ pub use crate::srp::{SrpEphemeral, SrpSession, SrpError};
 /// Derived key as uppercase hex string (64 characters = 32 bytes)
 #[uniffi::export]
 pub fn argon2_hash_password(password: String, salt: String) -> Result<String, SrpError> {
-    crate::srp::argon2_hash_password(&password, &salt)
+    crate::argon2::argon2_hash_password(&password, &salt)
+        .map_err(|e| SrpError::InvalidParameter(e.to_string()))
 }
 
 /// Generate a cryptographic salt for SRP.
