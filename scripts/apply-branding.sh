@@ -8,10 +8,10 @@ BRAND_DIR="$PROJECT_DIR/branding"
 BRAND_CONFIG="$PROJECT_DIR/branding.json"
 BUILD_DIR="$PROJECT_DIR/build"
 
-echo "=== AliasVault Custom Fork - Apply Branding ==="
+echo "=== MyVault - Apply Branding ==="
 
 if [ ! -f "$BRAND_CONFIG" ]; then
-    echo "ERROR: $BRAND_CONFIG not found. Copy .env.example and edit branding.json first."
+    echo "ERROR: $BRAND_CONFIG not found."
     exit 1
 fi
 
@@ -28,88 +28,107 @@ HOSTNAME=$(python3 -c "import json; print(json.load(open('$BRAND_CONFIG'))['host
 COMPANY_NAME=$(python3 -c "import json; print(json.load(open('$BRAND_CONFIG'))['company_name'])")
 ADMIN_EMAIL=$(python3 -c "import json; print(json.load(open('$BRAND_CONFIG'))['admin_email'])")
 
-echo "Applying branding: $APP_DISPLAY_NAME ($APP_NAME_SAFE)"
-echo "Docker images: $DOCKER_REGISTRY/$DOCKER_PREFIX-*"
-echo "Hostname: $HOSTNAME"
+echo "Applying branding:"
+echo "  App name:     $APP_DISPLAY_NAME"
+echo "  Docker prefix: $DOCKER_REGISTRY/$DOCKER_PREFIX-*"
+echo "  Hostname:     $HOSTNAME"
 
 rm -rf "$BUILD_DIR"
 cp -r "$UPSTREAM_DIR" "$BUILD_DIR"
 
-# --- 1. Replace Docker image references ---
-echo "  -> Replacing Docker image references..."
-find "$BUILD_DIR" -type f \( -name "*.yml" -o -name "*.yaml" -o -name "*.sh" -o -name "Dockerfile*" -o -name "*.md" \) -exec sed -i \
-    -e "s|ghcr.io/aliasvault/|$DOCKER_REGISTRY/$DOCKER_PREFIX-|g" \
-    -e "s|aliasvault/|$DOCKER_PREFIX-/|g" \
-    -e "s|image: .*aliasvault.*|& # BRANDED|g" \
+# --- 1. Replace Docker image references (ghcr.io/aliasvault/ -> your registry) ---
+echo "  -> Updating Docker image references..."
+find "$BUILD_DIR" -type f \( -name "*.yml" -o -name "*.yaml" \) -exec sed -i \
+    -e "s|ghcr\.io/aliasvault/|$DOCKER_REGISTRY/$DOCKER_PREFIX-|g" \
     {} +
 
-# --- 2. Replace project name references in source files ---
-echo "  -> Replacing project name references..."
-# Replace lowercase namespace/directory references
-find "$BUILD_DIR" -type f \( -name "*.cs" -o -name "*.csproj" -o -name "*.yml" -o -name "*.yaml" -o -name "*.sh" \) -exec sed -i \
-    -e "s/AliasVault\.Client/${APP_NAME_SAFE^}.Client/g" \
-    -e "s/AliasVault\.Api/${APP_NAME_SAFE^}.Api/g" \
-    -e "s/AliasVault\.Admin/${APP_NAME_SAFE^}.Admin/g" \
-    -e "s/AliasVault\.Shared/${APP_NAME_SAFE^}.Shared/g" \
-    -e "s/AliasVault\.TaskRunner/${APP_NAME_SAFE^}.TaskRunner/g" \
-    -e "s/AliasVault\.SmtpService/${APP_NAME_SAFE^}.SmtpService/g" \
-    {} +
-
-# --- 3. Replace display name in UI text ---
-echo "  -> Replacing display name in UI..."
-find "$BUILD_DIR" -type f \( -name "*.html" -o -name "*.cshtml" -o -name "*.razor" -o -name "*.tsx" -o -name "*.ts" -o -name "*.js" -o -name "*.css" \) -exec sed -i \
-    -e "s/AliasVault/$APP_DISPLAY_NAME/g" \
-    -e "s/ALIASVAULT/${APP_DISPLAY_NAME^^}/g" \
-    -e "s/aliasvault/$APP_NAME_SAFE/g" \
-    {} +
-
-# --- 4. Replace Docker Compose service names and container names ---
-echo "  -> Replacing Docker service/container names..."
+# --- 2. Replace container/service names in docker-compose files ---
+echo "  -> Updating container/service names..."
 find "$BUILD_DIR" -type f \( -name "docker-compose*.yml" -o -name "docker-compose*.yaml" \) -exec sed -i \
     -e "s/container_name: aliasvault/container_name: $APP_NAME_SAFE/g" \
-    -e "s/aliasvault\./$APP_NAME_SAFE./g" \
+    -e "s/aliasvault\\./$APP_NAME_SAFE./g" \
     {} +
 
-# --- 5. Replace in .env.example and .env ---
-echo "  -> Replacing .env references..."
-find "$BUILD_DIR" -name ".env*" -exec sed -i \
-    -e "s/ALIASVAULT_HOSTNAME/$APP_NAME_SAFE/g" \
-    -e "s/aliasvault\.com/$HOSTNAME/g" \
-    {} +
+# --- 3. Replace HTML <title> in the Blazor template ---
+echo "  -> Updating HTML title..."
+INDEX_TEMPLATE="$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/index.template.html"
+if [ -f "$INDEX_TEMPLATE" ]; then
+    sed -i "s|<title>AliasVault</title>|<title>$APP_DISPLAY_NAME</title>|" "$INDEX_TEMPLATE"
+fi
 
-# --- 6. Copy custom logo files ---
+# --- 4. Update manifest.json (PWA name) ---
+echo "  -> Updating PWA manifest..."
+MANIFEST="$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/manifest.json"
+if [ -f "$MANIFEST" ]; then
+    sed -i \
+        -e "s|\"name\": \"AliasVault\"|\"name\": \"$APP_DISPLAY_NAME\"|" \
+        -e "s|\"short_name\": \"AliasVault\"|\"short_name\": \"$APP_DISPLAY_NAME\"|" \
+        "$MANIFEST"
+fi
+
+# --- 5. Update .env.example with custom hostname ---
+echo "  -> Updating .env.example..."
+ENV_EXAMPLE="$BUILD_DIR/.env.example"
+if [ -f "$ENV_EXAMPLE" ]; then
+    # Replace the example hostname line
+    sed -i \
+        -e "s|aliasvault\.mydomain\.net|$HOSTNAME|g" \
+        -e "s|example\.com|$HOSTNAME|g" \
+        "$ENV_EXAMPLE"
+fi
+
+# --- 6. Copy custom logo files (overriding upstream assets) ---
+echo "  -> Copying branding assets..."
 if [ -f "$BRAND_DIR/logo.svg" ]; then
-    echo "  -> Copying custom logo.svg..."
     cp "$BRAND_DIR/logo.svg" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img/logo.svg"
 fi
 if [ -f "$BRAND_DIR/favicon.ico" ]; then
-    echo "  -> Copying custom favicon.ico..."
     cp "$BRAND_DIR/favicon.ico" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/favicon.ico"
 fi
+if [ -f "$BRAND_DIR/favicon.png" ]; then
+    cp "$BRAND_DIR/favicon.png" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/favicon.png"
+fi
 if [ -f "$BRAND_DIR/logo-192.png" ]; then
-    echo "  -> Copying custom logo-192.png..."
+    mkdir -p "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img"
     cp "$BRAND_DIR/logo-192.png" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img/logo-192.png"
 fi
 if [ -f "$BRAND_DIR/logo-512.png" ]; then
-    echo "  -> Copying custom logo-512.png..."
+    mkdir -p "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img"
     cp "$BRAND_DIR/logo-512.png" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img/logo-512.png"
 fi
-
-# --- 7. Copy mobile icons (iOS/Android) ---
-if [ -f "$BRAND_DIR/ios-icon.png" ]; then
-    echo "  -> Copying custom iOS icon..."
-    cp "$BRAND_DIR/ios-icon.png" "$BUILD_DIR/apps/mobile-app/ios/AliasVault/Asset catalog/AppIcon.appiconset/Icon-App-20x20@2x.png" 2>/dev/null || true
+if [ -f "$BRAND_DIR/favicon.png" ]; then
+    mkdir -p "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img"
+    cp "$BRAND_DIR/favicon.png" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img/favicon.png"
 fi
 
-# --- 8. Generate custom .env ---
-echo "  -> Generating .env from .env.example..."
-sed -i \
-    -e "s|ALIASVAULT_HOSTNAME=.*|$APP_NAME_SAFE\_HOSTNAME=$HOSTNAME|g" \
-    -e "s|example\.com|$HOSTNAME|g" \
-    "$BUILD_DIR/.env.example"
+# --- 7. Update install.sh references (if present) ---
+echo "  -> Updating install script references..."
+INSTALL_SH="$BUILD_DIR/install.sh"
+if [ -f "$INSTALL_SH" ]; then
+    sed -i \
+        -e "s|aliasvault\\.com|$HOSTNAME|g" \
+        -e "s|aliasvault\\.net|$HOSTNAME|g" \
+        "$INSTALL_SH"
+fi
 
-echo "Branding applied. Build output is in $BUILD_DIR"
+# --- 8. Update docs/README.md references ---
+echo "  -> Updating documentation references..."
+find "$BUILD_DIR/docs" -type f -name "*.md" -exec sed -i \
+    -e "s|aliasvault\\.com|$HOSTNAME|g" \
+    -e "s|docs\\.aliasvault\\.com|docs.$HOSTNAME|g" \
+    {} + 2>/dev/null || true
+
+# --- 9. Generate a custom .env from .env.example ---
+echo "  -> Generating .env..."
+cp "$BUILD_DIR/.env.example" "$BUILD_DIR/.env"
+sed -i \
+    -e "s|ALIASVAULT_HOSTNAME=.*|ALIASVAULT_HOSTNAME=$HOSTNAME|" \
+    -e "s|EMAIL_DOMAIN=.*|EMAIL_DOMAIN=$(echo "$HOSTNAME" | sed 's/^[^.]*\.//')|" \
+    "$BUILD_DIR/.env"
+
 echo ""
-echo "Next steps:"
-echo "  cd $BUILD_DIR"
-echo "  docker compose -f docker-compose.custom.yml up -d --build"
+echo "Branding applied successfully."
+echo "Build output: $BUILD_DIR"
+echo ""
+echo "To build Docker images, run from the project root:"
+echo "  docker build -f $BUILD_DIR/dockerfiles/all-in-one/Dockerfile -t $DOCKER_REGISTRY/$DOCKER_PREFIX:latest $BUILD_DIR"
