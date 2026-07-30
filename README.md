@@ -38,8 +38,9 @@ git remote add upstream https://github.com/aliasvault/aliasvault.git
 ./scripts/build.sh             # build Docker images (interactive)
 
 # 6. Deploy
-cp docker-compose.deploy.yml docker-compose.yml
-# Edit docker-compose.yml → replace ghcr.io/your-org/myvault-* with your pushed images
+cp docker-compose.custom.yml docker-compose.yml
+# Edit docker-compose.yml: replace image name with yours
+# Edit .env: set POSTGRES_PASSWORD, ALLOWED_HOSTS, EMAIL_DOMAIN
 docker compose up -d
 ```
 
@@ -78,14 +79,23 @@ aliasvault-custom/
 └── README.md                 # This file
 ```
 
-## Branding Configuration
+## What the Branding Script Changes
+
+The `apply-branding.sh` script makes **surgical** changes only — it does NOT touch .NET source code or rename namespaces. It modifies:
+
+- **Docker image references** (`ghcr.io/aliasvault/` → your custom registry in docker-compose files)
+- **Container/service names** in docker-compose
+- **HTML `<title>`** tag in the Blazor app (`index.template.html`)
+- **PWA manifest** name and short_name
+- **Logo files** (logo.svg, favicon, PWA icons)
+- **.env.example** with your hostname
+
+This means you can safely update from upstream — branding changes don't conflict with .NET project renames.
 
 All branding is controlled in `branding.json`:
 
-| Field | Example | Description |
-|-------|---------|-------------|
-| `app_name_safe` | `acmevault` | Lowercase identifier used in Docker image names and code |
-| `app_display_name` | `Acme Vault` | Human-readable name shown in the UI |
+| `app_name_safe` | `acmevault` | Lowercase identifier used in Docker image names |
+| `app_display_name` | `Acme Vault` | Human-readable name shown in the UI title bar |
 | `docker_registry` | `ghcr.io/acmecorp` | Docker registry for custom images |
 | `docker_image_prefix` | `acmevault` | Prefix prepended to all custom image names |
 | `hostname` | `vault.acmecorp.com` | Server hostname |
@@ -103,42 +113,33 @@ All branding is controlled in `branding.json`:
 
 ### Deployment Steps
 
-1. **Build images** (from the repo root):
+1. **Build the all-in-one image** (from the repo root):
    ```bash
    ./scripts/build.sh
    ```
 
 2. **Push to your registry**:
    ```bash
-   docker tag myvault-client ghcr.io/yourcompany/myvault-client:latest
-   docker push ghcr.io/yourcompany/myvault-client:latest
-   # Repeat for api, admin, reverse-proxy, smtp, task-runner
+   docker tag ghcr.io/your-org/myvault:latest ghcr.io/your-org/myvault:latest
+   docker push ghcr.io/your-org/myvault:latest
    ```
 
 3. **Deploy**:
    ```bash
-   cp docker-compose.deploy.yml docker-compose.yml
-   # Edit docker-compose.yml: replace image names with yours
+   cp docker-compose.custom.yml docker-compose.yml
+   # Edit docker-compose.yml → replace image name with yours from your registry
    # Edit .env: set POSTGRES_PASSWORD, ALLOWED_HOSTS, EMAIL_DOMAIN
    docker compose up -d
    ```
 
-4. **Configure SSL** (if not using the built-in reverse proxy cert):
+4. **Configure SSL** (if not using the built-in reverse proxy):
    ```bash
    certbot certonly --standalone -d vault.yourcompany.com
    ```
 
 ## Architecture Notes
 
-Based on AliasVault's multi-container architecture:
-
-- **client** — Blazor WebAssembly UI served by nginx (port 3000)
-- **api** — .NET backend API (port 3001)
-- **admin** — Admin dashboard (port 3002)
-- **reverse-proxy** — Traefik/nginx reverse proxy handling SSL (ports 80, 443)
-- **smtp** — Built-in email server for alias handling (ports 25, 587)
-- **task-runner** — Background jobs (data retention, cleanup)
-- **postgres** — Database (not published, internal only)
+This fork uses AliasVault's all-in-one Docker image approach — a single container that runs the client UI, API, admin panel, SMTP server, task runner, and nginx reverse proxy together. This simplifies deployment significantly.
 
 ## Why This Fork?
 
