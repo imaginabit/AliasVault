@@ -1,0 +1,21 @@
+{
+  "app_name": "MyVault",
+  "app_name_safe": "myvault",
+  "app_display_name": "MyVault",
+  "app_description": "Self-hosted password and email alias manager",
+  "docker_registry": "ghcr.io/your-org",
+  "docker_image_prefix": "myvault",
+  "hostname": "myvault.example.com",
+  "logo": {
+    "source": "branding/logo.svg",
+    "favicon": "branding/favicon.ico",
+    "icon_192": "branding/logo-192.png",
+    "icon_512": "branding/logo-512.png"
+  },
+  "colors": {
+    "primary": "#2563eb",
+    "accent": "#0ea5e9"
+  },
+  "admin_email": "admin@yourcompany.com",
+  "company_name": "Your Company"
+}

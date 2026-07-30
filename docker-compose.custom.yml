@@ -1,0 +1,30 @@
+# Custom AliasVault Compose - Edit values below for your deployment
+include:
+  - path: ./upstream/docker-compose.yml
+    env_file: ./upstream/.env.example
+  # Add your custom overrides below (files later take precedence)
+
+services:
+  client:
+    image: ghcr.io/your-org/myvault-client:latest
+    environment:
+      - APP_NAME=MyVault
+      - APP_HOSTNAME=myvault.example.com
+
+  api:
+    image: ghcr.io/your-org/myvault-api:latest
+    environment:
+      - APP_NAME=MyVault
+      - APP_HOSTNAME=myvault.example.com
+
+  reverse-proxy:
+    image: ghcr.io/your-org/myvault-reverse-proxy:latest
+    ports:
+      - "80:80"
+      - "443:443"
+
+  smtp:
+    image: ghcr.io/your-org/myvault-smtp:latest
+    ports:
+      - "25:25"
+      - "587:587"
