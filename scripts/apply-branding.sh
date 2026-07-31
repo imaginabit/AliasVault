@@ -64,7 +64,20 @@ if [ -f "$MANIFEST" ]; then
         "$MANIFEST"
 fi
 
-# --- 5. Update .env.example with custom hostname ---
+# --- 5. Replace AliasVault in Razor components (visible text) ---
+echo "  -> Branding Razor components..."
+find "$BUILD_DIR/apps/server/AliasVault.Client" -name "*.razor" -exec sed -i \
+    -e 's|alt="AliasVault"|alt="'"$APP_DISPLAY_NAME"'"|g' \
+    -e 's|alt="AliasVault Assistant"|alt="'"$APP_DISPLAY_NAME Assistant"'"|g' \
+    -e 's|>AliasVault<|>'"$APP_DISPLAY_NAME"'<|g' \
+    {} +
+
+# --- Handle Logo.razor specifically via overlay ---
+if [ -f "$BRAND_DIR/Logo.razor" ]; then
+    cp "$BRAND_DIR/Logo.razor" "$BUILD_DIR/apps/server/AliasVault.Client/Auth/Components/Logo.razor"
+fi
+
+# --- 6. Update .env.example with custom hostname ---
 echo "  -> Updating .env.example..."
 ENV_EXAMPLE="$BUILD_DIR/.env.example"
 if [ -f "$ENV_EXAMPLE" ]; then
