@@ -1,0 +1,18 @@
+services:
+  myvault:
+    image: ghcr.io/your-org/myvault:latest
+    container_name: myvault
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+      - "2525:25"
+      - "5877:587"
+    volumes:
+      - ./database:/database
+      - ./logs:/logs
+      - ./secrets:/secrets
+      - ./certificates:/certificates
+    environment:
+      FORCE_HTTPS_REDIRECT: "false"
+      PUBLIC_REGISTRATION_ENABLED: "true"

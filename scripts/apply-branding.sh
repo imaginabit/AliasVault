@@ -28,10 +28,9 @@ HOSTNAME=$(python3 -c "import json; print(json.load(open('$BRAND_CONFIG'))['host
 COMPANY_NAME=$(python3 -c "import json; print(json.load(open('$BRAND_CONFIG'))['company_name'])")
 ADMIN_EMAIL=$(python3 -c "import json; print(json.load(open('$BRAND_CONFIG'))['admin_email'])")
 
-echo "Applying branding:"
-echo "  App name:     $APP_DISPLAY_NAME"
-echo "  Docker prefix: $DOCKER_REGISTRY/$DOCKER_PREFIX-*"
-echo "  Hostname:     $HOSTNAME"
+echo "Applying branding: $APP_DISPLAY_NAME ($APP_NAME_SAFE)"
+echo "Docker images: $DOCKER_REGISTRY/$DOCKER_PREFIX-*"
+echo "Default language: $(python3 -c "import json; print(json.load(open('$BRAND_CONFIG')).get('default_language','en'))")"
 
 rm -rf "$BUILD_DIR"
 cp -r "$UPSTREAM_DIR" "$BUILD_DIR"
@@ -46,14 +45,13 @@ find "$BUILD_DIR" -type f \( -name "*.yml" -o -name "*.yaml" \) -exec sed -i \
 echo "  -> Updating container/service names..."
 find "$BUILD_DIR" -type f \( -name "docker-compose*.yml" -o -name "docker-compose*.yaml" \) -exec sed -i \
     -e "s/container_name: aliasvault/container_name: $APP_NAME_SAFE/g" \
-    -e "s/aliasvault\\./$APP_NAME_SAFE./g" \
+    -e "s/aliasvault\./$APP_NAME_SAFE./g" \
     {} +
 
-# --- 3. Replace HTML <title> in the Blazor template ---
-echo "  -> Updating HTML title..."
-INDEX_TEMPLATE="$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/index.template.html"
-if [ -f "$INDEX_TEMPLATE" ]; then
-    sed -i "s|<title>AliasVault</title>|<title>$APP_DISPLAY_NAME</title>|" "$INDEX_TEMPLATE"
+# --- 3. Brand index.template.html (title, loading screen, language) ---
+echo "  -> Branding index.template.html..."
+if [ -x "$(command -v python3)" ]; then
+    python3 "$PROJECT_DIR/scripts/brand_template.py" "$BUILD_DIR"
 fi
 
 # --- 4. Update manifest.json (PWA name) ---
@@ -70,9 +68,8 @@ fi
 echo "  -> Updating .env.example..."
 ENV_EXAMPLE="$BUILD_DIR/.env.example"
 if [ -f "$ENV_EXAMPLE" ]; then
-    # Replace the example hostname line
     sed -i \
-        -e "s|aliasvault\.mydomain\.net|$HOSTNAME|g" \
+        -e "s|ALIASVAULT_HOSTNAME=.*|ALIASVAULT_HOSTNAME=$HOSTNAME|" \
         -e "s|example\.com|$HOSTNAME|g" \
         "$ENV_EXAMPLE"
 fi
@@ -96,39 +93,24 @@ if [ -f "$BRAND_DIR/logo-512.png" ]; then
     mkdir -p "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img"
     cp "$BRAND_DIR/logo-512.png" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img/logo-512.png"
 fi
-if [ -f "$BRAND_DIR/favicon.png" ]; then
-    mkdir -p "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img"
-    cp "$BRAND_DIR/favicon.png" "$BUILD_DIR/apps/server/AliasVault.Client/wwwroot/img/favicon.png"
-fi
 
-# --- 7. Update install.sh references (if present) ---
+# --- 7. Update install.sh references ---
 echo "  -> Updating install script references..."
 INSTALL_SH="$BUILD_DIR/install.sh"
 if [ -f "$INSTALL_SH" ]; then
     sed -i \
-        -e "s|aliasvault\\.com|$HOSTNAME|g" \
-        -e "s|aliasvault\\.net|$HOSTNAME|g" \
+        -e "s|aliasvault\.com|$HOSTNAME|g" \
+        -e "s|aliasvault\.net|$HOSTNAME|g" \
         "$INSTALL_SH"
 fi
 
-# --- 8. Update docs/README.md references ---
-echo "  -> Updating documentation references..."
-find "$BUILD_DIR/docs" -type f -name "*.md" -exec sed -i \
-    -e "s|aliasvault\\.com|$HOSTNAME|g" \
-    -e "s|docs\\.aliasvault\\.com|docs.$HOSTNAME|g" \
-    {} + 2>/dev/null || true
-
-# --- 9. Generate a custom .env from .env.example ---
+# --- 8. Generate .env ---
 echo "  -> Generating .env..."
 cp "$BUILD_DIR/.env.example" "$BUILD_DIR/.env"
 sed -i \
     -e "s|ALIASVAULT_HOSTNAME=.*|ALIASVAULT_HOSTNAME=$HOSTNAME|" \
-    -e "s|EMAIL_DOMAIN=.*|EMAIL_DOMAIN=$(echo "$HOSTNAME" | sed 's/^[^.]*\.//')|" \
     "$BUILD_DIR/.env"
 
 echo ""
 echo "Branding applied successfully."
 echo "Build output: $BUILD_DIR"
-echo ""
-echo "To build Docker images, run from the project root:"
-echo "  docker build -f $BUILD_DIR/dockerfiles/all-in-one/Dockerfile -t $DOCKER_REGISTRY/$DOCKER_PREFIX:latest $BUILD_DIR"

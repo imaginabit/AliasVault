@@ -1,3 +1,7 @@
 build/
 upstream/
 .env
+database/
+certificates/
+logs/
+secrets/

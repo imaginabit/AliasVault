@@ -16,6 +16,7 @@
     "primary": "#2563eb",
     "accent": "#0ea5e9"
   },
+  "default_language": "es",
   "admin_email": "admin@yourcompany.com",
   "company_name": "Your Company"
 }
