@@ -35,6 +35,25 @@ echo "Default language: $(python3 -c "import json; print(json.load(open('$BRAND_
 rm -rf "$BUILD_DIR"
 cp -r "$UPSTREAM_DIR" "$BUILD_DIR"
 
+# --- 0. Apply custom patches (feature changes against pristine upstream) ---
+if [ -d "$BRAND_DIR/patches" ]; then
+    for patch in "$BRAND_DIR"/patches/*.patch; do
+        [ -e "$patch" ] || continue
+        echo "  -> Applying patch: $(basename "$patch")"
+        git -C "$BUILD_DIR" apply --whitespace=nowarn "$patch"
+    done
+fi
+
+# Add runtime env vars introduced by patches to .env.example and .env generation
+if ! grep -q "ALLOWED_REGISTRATION_DOMAINS" "$BUILD_DIR/.env.example" 2>/dev/null; then
+    cat >> "$BUILD_DIR/.env.example" <<'EOF'
+
+# Comma-separated list of email domains allowed to register new accounts.
+# Leave empty to allow any username. Example: ALLOWED_REGISTRATION_DOMAINS=mycompany.com,subsidiary.com
+ALLOWED_REGISTRATION_DOMAINS=
+EOF
+fi
+
 # --- 1. Replace Docker image references (ghcr.io/aliasvault/ -> your registry) ---
 echo "  -> Updating Docker image references..."
 find "$BUILD_DIR" -type f \( -name "*.yml" -o -name "*.yaml" \) -exec sed -i \

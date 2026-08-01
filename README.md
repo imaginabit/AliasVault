@@ -92,6 +92,21 @@ The `apply-branding.sh` script makes **surgical** changes only — it does NOT t
 
 This means you can safely update from upstream — branding changes don't conflict with .NET project renames.
 
+## Custom Patches
+
+Feature changes that DO touch .NET source code live as git patches in `branding/patches/`. They are applied to pristine upstream code (before branding seds) on every `apply-branding.sh` run, and verified against upstream on each update.
+
+### `001-registration-domain-restriction.patch`
+
+Restricts account registration to specific email domains (B2B use case). Set at runtime:
+
+```bash
+# .env — comma-separated, empty = unrestricted (upstream default)
+ALLOWED_REGISTRATION_DOMAINS=acmecorp.com,subsidiary.com
+```
+
+When set, usernames MUST be email addresses from one of those domains — enforced server-side in both `register` and `validate-username` endpoints. The client shows a localized error (`en`/`es` included; other languages fall back to the error code until translated).
+
 All branding is controlled in `branding.json`:
 
 | `app_name_safe` | `acmevault` | Lowercase identifier used in Docker image names |

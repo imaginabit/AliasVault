@@ -1,0 +1,164 @@
+diff --git a/apps/server/AliasVault.Api/Config.cs b/apps/server/AliasVault.Api/Config.cs
+index cbad690..71d522d 100644
+--- a/apps/server/AliasVault.Api/Config.cs
++++ b/apps/server/AliasVault.Api/Config.cs
+@@ -29,4 +29,11 @@ public class Config : SharedConfig
+     /// These domains still function as private email domains but are not shown in domain selection dropdowns.
+     /// </summary>
+     public List<string> HiddenPrivateEmailDomains { get; set; } = [];
++
++    /// <summary>
++    /// Gets or sets the list of email domains allowed to register new accounts.
++    /// When empty, registration is unrestricted. When set, the username must be an
++    /// email address whose domain matches one of these entries.
++    /// </summary>
++    public List<string> AllowedRegistrationDomains { get; set; } = [];
+ }
+diff --git a/apps/server/AliasVault.Api/Controllers/AuthController.cs b/apps/server/AliasVault.Api/Controllers/AuthController.cs
+index f815768..7ff337f 100644
+--- a/apps/server/AliasVault.Api/Controllers/AuthController.cs
++++ b/apps/server/AliasVault.Api/Controllers/AuthController.cs
+@@ -442,6 +442,12 @@ public class AuthController(IAliasServerDbContextFactory dbContextFactory, UserM
+             return BadRequest(ApiErrorCodeHelper.CreateValidationErrorResponse(ApiErrorCode.PUBLIC_REGISTRATION_DISABLED, 400));
+         }
+ 
++        // Check if the username's email domain is allowed to register.
++        if (!IsRegistrationDomainAllowed(model.Username))
++        {
++            return BadRequest(ApiErrorCodeHelper.CreateValidationErrorResponse(ApiErrorCode.REGISTRATION_DOMAIN_NOT_ALLOWED, 400));
++        }
++
+         // Check the IP blocklist using the raw IP address.
+         var rawIpAddress = IpAddressUtility.GetRawIpAddressFromContext(HttpContext);
+         if (await ipBlockListService.IsBlockedForRegistrationAsync(rawIpAddress))
+@@ -560,6 +566,12 @@ public class AuthController(IAliasServerDbContextFactory dbContextFactory, UserM
+             return BadRequest(ApiErrorCodeHelper.CreateErrorResponse(ApiErrorCode.PUBLIC_REGISTRATION_DISABLED, 400));
+         }
+ 
++        // Check if the username's email domain is allowed to register.
++        if (!IsRegistrationDomainAllowed(model.Username))
++        {
++            return BadRequest(ApiErrorCodeHelper.CreateErrorResponse(ApiErrorCode.REGISTRATION_DOMAIN_NOT_ALLOWED, 400));
++        }
++
+         if (string.IsNullOrWhiteSpace(model.Username))
+         {
+             return BadRequest(ApiErrorCodeHelper.CreateErrorResponse(ApiErrorCode.USERNAME_REQUIRED, 400));
+@@ -917,6 +929,34 @@ public class AuthController(IAliasServerDbContextFactory dbContextFactory, UserM
+         return principal;
+     }
+ 
++    /// <summary>
++    /// Checks whether the username's email domain is in the allowed registration domains list.
++    /// Returns true when no domain restriction is configured.
++    /// </summary>
++    /// <param name="username">The username to check.</param>
++    /// <returns>True if registration is allowed for this username, false otherwise.</returns>
++    private bool IsRegistrationDomainAllowed(string username)
++    {
++        if (config.AllowedRegistrationDomains.Count == 0)
++        {
++            return true;
++        }
++
++        if (string.IsNullOrWhiteSpace(username))
++        {
++            return false;
++        }
++
++        var atIndex = username.LastIndexOf('@');
++        if (atIndex < 1 || atIndex == username.Length - 1)
++        {
++            return false;
++        }
++
++        var domain = username[(atIndex + 1)..];
++        return config.AllowedRegistrationDomains.Contains(domain, StringComparer.OrdinalIgnoreCase);
++    }
++
+     /// <summary>
+     /// Validates if a given username meets the required criteria.
+     /// </summary>
+diff --git a/apps/server/AliasVault.Api/Program.cs b/apps/server/AliasVault.Api/Program.cs
+index 9923ca0..8172efe 100644
+--- a/apps/server/AliasVault.Api/Program.cs
++++ b/apps/server/AliasVault.Api/Program.cs
+@@ -57,6 +57,12 @@ var hiddenPrivateEmailDomains = Environment.GetEnvironmentVariable("HIDDEN_PRIVA
+     .Where(d => !string.IsNullOrWhiteSpace(d));
+ config.HiddenPrivateEmailDomains = hiddenPrivateEmailDomains?.ToList() ?? new List<string>();
+ 
++var allowedRegistrationDomains = Environment.GetEnvironmentVariable("ALLOWED_REGISTRATION_DOMAINS")?
++    .Split(",", StringSplitOptions.RemoveEmptyEntries)
++    .Select(d => d.Trim().TrimStart('@').ToLowerInvariant())
++    .Where(d => !string.IsNullOrWhiteSpace(d));
++config.AllowedRegistrationDomains = allowedRegistrationDomains?.ToList() ?? new List<string>();
++
+ var ipLoggingEnabled = Environment.GetEnvironmentVariable("IP_LOGGING_ENABLED") ?? "false";
+ config.IpLoggingEnabled = bool.Parse(ipLoggingEnabled);
+ 
+diff --git a/apps/server/AliasVault.Client/Resources/ApiErrors.en.resx b/apps/server/AliasVault.Client/Resources/ApiErrors.en.resx
+index c905f4a..437138a 100644
+--- a/apps/server/AliasVault.Client/Resources/ApiErrors.en.resx
++++ b/apps/server/AliasVault.Client/Resources/ApiErrors.en.resx
+@@ -128,6 +128,9 @@
+   <data name="PUBLIC_REGISTRATION_DISABLED" xml:space="preserve">
+     <value>New account registration is currently disabled on this server. Please contact the administrator.</value>
+   </data>
++  <data name="REGISTRATION_DOMAIN_NOT_ALLOWED" xml:space="preserve">
++    <value>Registration is only allowed with an email address from an authorized domain. Please contact your administrator.</value>
++  </data>
+   <data name="REGISTRATION_FAILED" xml:space="preserve">
+     <value>Could not create the account. Please try again in a few minutes. If this problem persists, please contact support.</value>
+   </data>
+diff --git a/apps/server/AliasVault.Client/Resources/ApiErrors.es.resx b/apps/server/AliasVault.Client/Resources/ApiErrors.es.resx
+index b6ccd1e..fb576f4 100644
+--- a/apps/server/AliasVault.Client/Resources/ApiErrors.es.resx
++++ b/apps/server/AliasVault.Client/Resources/ApiErrors.es.resx
+@@ -128,6 +128,9 @@
+   <data name="PUBLIC_REGISTRATION_DISABLED" xml:space="preserve">
+     <value>El registro de nueva cuenta está actualmente deshabilitado en este servidor. Por favor, contacte con el administrador.</value>
+   </data>
++  <data name="REGISTRATION_DOMAIN_NOT_ALLOWED" xml:space="preserve">
++    <value>El registro solo está permitido con una dirección de correo de un dominio autorizado. Por favor, contacte con su administrador.</value>
++  </data>
+   <data name="REGISTRATION_FAILED" xml:space="preserve">
+     <value>No se pudo crear la cuenta. Por favor, inténtelo de nuevo en unos minutos. Si el problema persiste, póngase en contacto con soporte.</value>
+   </data>
+diff --git a/apps/server/Shared/AliasVault.Shared/Models/Enums/ApiErrorCode.cs b/apps/server/Shared/AliasVault.Shared/Models/Enums/ApiErrorCode.cs
+index 4a0f779..fe14cf9 100644
+--- a/apps/server/Shared/AliasVault.Shared/Models/Enums/ApiErrorCode.cs
++++ b/apps/server/Shared/AliasVault.Shared/Models/Enums/ApiErrorCode.cs
+@@ -153,4 +153,9 @@ public enum ApiErrorCode
+     /// Generic user account registration failure.
+     /// </summary>
+     REGISTRATION_FAILED,
++
++    /// <summary>
++    /// Registration is only allowed for email addresses from specific domains.
++    /// </summary>
++    REGISTRATION_DOMAIN_NOT_ALLOWED,
+ }
+diff --git a/dockerfiles/all-in-one/Dockerfile b/dockerfiles/all-in-one/Dockerfile
+index 24256d7..8fe5fe4 100644
+--- a/dockerfiles/all-in-one/Dockerfile
++++ b/dockerfiles/all-in-one/Dockerfile
+@@ -221,6 +221,7 @@ ENV DEPLOYMENT_MODE=${DEPLOYMENT_MODE} \
+     SUPPORT_EMAIL="" \
+     PRIVATE_EMAIL_DOMAINS="" \
+     HIDDEN_PRIVATE_EMAIL_DOMAINS="" \
++    ALLOWED_REGISTRATION_DOMAINS="" \
+     HOSTNAME=localhost \
+     POSTGRES_HOST=localhost \
+     POSTGRES_PORT=5432 \
+diff --git a/dockerfiles/all-in-one/s6-scripts/api/run b/dockerfiles/all-in-one/s6-scripts/api/run
+index 5a90c99..2710611 100644
+--- a/dockerfiles/all-in-one/s6-scripts/api/run
++++ b/dockerfiles/all-in-one/s6-scripts/api/run
+@@ -31,6 +31,7 @@ export ASPNETCORE_URLS="http://0.0.0.0:3001"
+ export ASPNETCORE_PATHBASE="/api"
+ export PRIVATE_EMAIL_DOMAINS="${PRIVATE_EMAIL_DOMAINS:-}"
+ export HIDDEN_PRIVATE_EMAIL_DOMAINS="${HIDDEN_PRIVATE_EMAIL_DOMAINS:-}"
++export ALLOWED_REGISTRATION_DOMAINS="${ALLOWED_REGISTRATION_DOMAINS:-}"
+ export PUBLIC_REGISTRATION_ENABLED="${PUBLIC_REGISTRATION_ENABLED:-true}"
+ export IP_LOGGING_ENABLED="${IP_LOGGING_ENABLED:-true}"
+ 
